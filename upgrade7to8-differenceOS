@@ -1,0 +1,201 @@
+different between rhel 7 , 8 , 9
+
+1. Core System & Performance
+RHEL 7 
+Kernel Version	    3.10
+Default Filesystem	XFS
+Package Manager	    yum
+Architecture	      x86_64
+
+RHEL 8 
+Kernel Version	    4.18
+Default Filesystem	XFS(improved)
+Package Manager	    dnf (labeled as yum 4)
+Architecture	      x86_64-v1
+
+RHEL 9
+Kernel Version	    5.14
+Default Filesystem	XFS (with Direct Access/DAX)
+Package Manager	    dnf (faster, optimized)
+Architecture	      x86_64-v2 (Req. newer CPUs)
+
+2. Software Management (The Biggest Change)
+RHEL 7: Used a "monolithic" approach. If you wanted a newer version of Python or PHP, you often had to use "Software Collections" (SCL), which was clunky.
+RHEL 8: Introduced Application Streams (AppStreams). This allows you to install multiple versions of the same software (e.g., Python 3.6 vs 3.9) on the same OS without conflicts.
+RHEL 9: Refined AppStreams. It removed many legacy "compat" libraries to make the OS smaller and faster.
+
+3. Security & Networking
+RHEL 7: Used iptables for firewall management and supported older encryption (TLS 1.0).
+RHEL 8: Replaced iptables with nftables as the default filtering framework. It also introduced System-wide Crypto Policies (e.g., setting the whole system to "FUTURE" or "LEGACY" security levels).
+RHEL 9: Disables SSH root login with password by default (requires keys). It also removes support for older, insecure algorithms like SHA-1 for digital signatures
+
+4. Management Tools
+RHEL 7: Mostly managed via Command Line Interface (CLI).
+RHEL 8: Introduced the Cockpit Web Console as the standard GUI for server management (Storage, Networking, Logs).
+RHEL 9: Cockpit is even more integrated, allowing for Kernel Live Patching and sophisticated performance metrics directly from the web browser.
+
+5. Programming Languages (Default)
+RHEL 7: Python 2.7 (Legacy).
+RHEL 8: Python 3.6 (Standard), but 2.7 was still available.
+RHEL 9: Python 3.9 is the default; Python 2.7 is completely removed.
+
+Summary: Which one to use?
+RHEL 7: Avoid. It reached End of Maintenance in June 2024.
+RHEL 8: Best for stability and compatibility with "older" enterprise apps. Supported until 2029.
+RHEL 9: Best for new deployments, cloud-native apps (containers), and the highest security standards. Supported until 2032.
+
+Upgrading an existing RHEL server is primarily done via an in-place upgrade using the official Leapp utility. This tool automates the replacement of the operating system while preserving your data and configurations.
+
+Critical Limitations & Upgrade Path
+Sequential Upgrades: You cannot skip major versions (e.g., jumping directly from RHEL 7 to RHEL 9). You must first upgrade RHEL 7 to RHEL 8, then RHEL 8 to RHEL 9.
+Supported Source: To start the upgrade, your system must be on the latest minor release of the current major version (e.g., RHEL 7.9 for a RHEL 8 upgrade).
+Disk Encryption: Leapp does not currently support systems with whole-disk encryption (LUKS). 
+
+The Upgrade Workflow
+Preparation & Backup:
+Perform a full system backup or take a VM snapshot.
+Ensure at least 5 GB of free space in the /var filesystem.
+Disable configuration management tools like Puppet, Salt, or Chef.
+Install the Leapp Tool:
+Enable the required "extras" repository and install the package:
+sudo yum install leapp-upgrade
+
+Pre-Upgrade Assessment:
+Run the check to identify "inhibitors" (issues that will break the upgrade):
+
+sudo leapp preupgrade --target <target_version>
+
+Review the report generated at /var/log/leapp/leapp-report.txt. You must resolve all "Inhibitor" level risks before the actual upgrade can proceed.
+
+Execute the Upgrade:
+Once the pre-check is clean, start the upgrade:
+sudo leapp upgrade --target <target_version>
+sudo reboot
+
+The system will reboot into a special RAM disk environment to perform the package swaps.
+Post-Upgrade Verification:
+Verify the new version: cat /etc/redhat-release.
+Re-enable security policies (like SELinux if it was set to permissive) and configuration management
+
+Would you like the exact list of inhibitor fixes commonly found when moving from RHEL 7 to RHEL 8?
+
+To move forward with the upgrade, you must resolve these common "Inhibitors" found in the leapp-report.txt. If these aren't fixed, the upgrade process will intentionally block itself to prevent system corruption.
+1. The Answerfile (Most Common)
+Leapp requires you to confirm that you have acknowledged the removal of the PAM PKCS#11 module.
+Fix: Run this command to "answer" the prompt:
+
+sudo leapp answer --section remove_pam_pkcs11_module_check.confirm=True
+
+2. PermitRootLogin (SSH)
+RHEL 8 changes how the Root user logs in via SSH. You must explicitly set a configuration for it.
+Fix: Edit /etc/ssh/sshd_config and ensure the line PermitRootLogin is set to either yes or prohibit-password. Then restart the service:
+
+sudo systemctl restart sshd
+
+3. Unsupported Kernel Modules
+RHEL 8 dropped support for many older hardware drivers (like some older RAID controllers or floppy drives).
+Fix: If the report lists a module (e.g., floppy or pata_acpi), you must unload it:
+
+sudo modprobe -r module_name
+
+Note: If your boot disk relies on a dropped driver, you cannot perform an in-place upgrade.
+
+4. Multiple Kernel Versions
+Leapp requires the system to be running the latest RHEL 7.9 kernel and have no old kernels interfering.
+Fix: Update your system and reboot into the newest kernel before starting
+
+sudo yum update -y
+sudo reboot
+
+5. Missing GPG Keys
+Since you are upgrading without a subscription, Leapp may complain about missing signatures for the new RHEL 8 packages.
+Fix: Import the RHEL 8 GPG key manually:
+
+sudo rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+
+6. Disc Space in /var/lib/leapp
+The upgrade downloads several gigabytes of data to /var/lib/leapp.
+Fix: Ensure you have at least 5GB of free space in /var. You can check this with df -h /var.
+
+After upgrading RHEL without a subscription, you must manually point the package manager (dnf or yum) to the installation media to install or update software.
+
+1. Mount the Installation Media 
+First, create a mount point and mount your RHEL ISO file: 
+
+sudo mkdir -p /mnt/disc
+sudo mount -o loop /path/to/rhel-dvd.iso /mnt/disc
+
+(Note: Replace /path/to/rhel-dvd.iso with the actual path to your downloaded RHEL 8 or 9 ISO.)
+
+2. Create the Local Repo File
+Create a new configuration file in the /etc/yum.repos.d/ directory. You can name it local.repo. 
+
+sudo vi /etc/yum.repos.d/local.repo
+
+3. Add the Repository Syntax 
+Paste the following configuration into the file. RHEL 8 and 9 require two separate sections: BaseOS for core system packages and AppStream for applications. 
+For RHEL 8/9:
+
+
+ini
+[BaseOS]
+name=RHEL BaseOS
+metadata_expire=-1
+enabled=1
+gpgcheck=1
+baseurl=file:///mnt/disc/BaseOS/
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+
+[AppStream]
+name=RHEL AppStream
+metadata_expire=-1
+enabled=1
+gpgcheck=1
+baseurl=file:///mnt/disc/AppStream/
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+
+(If you encounter GPG errors, you can set gpgcheck=0 temporarily to bypass signature verification.)
+
+4. Refresh the Package Cache 
+Clear the old cache and verify that the new local repositories are active: 
+
+sudo dnf clean all
+sudo dnf repolist
+
+You should now see BaseOS and AppStream listed in the output, allowing you to install packages normally
+
+Pro Tip: To prevent the "This system is not registered" warning from appearing every time you run a command, edit /etc/yum/pluginconf.d/subscription-manager.conf and change enabled=1 to enabled=0
+
+To make the mount persist after a reboot, you need to add it to the /etc/fstab file. This tells the system to automatically mount the ISO or disk every time it starts up.
+Step 1: Get the Path or UUID
+If you are using a physical DVD or a virtual drive (like in VMware/VirtualBox), identify the device name:
+
+lsblk
+
+(Commonly it is /dev/sr0 or /dev/cdrom.)
+
+Step 2: Edit the fstab File
+Open the file with root privileges
+
+sudo vi /etc/fstab
+
+Step 3: Add the Entry
+Add one of the following lines at the bottom of the file depending on your setup:
+Option A: For a physical DVD/Virtual Drive
+
+/dev/sr0   /mnt/disc   iso9660   defaults,ro   0 0
+
+Option B: For a stored ISO file (Loop Mount)
+
+/path/to/rhel-dvd.iso   /mnt/disc   iso9660   loop,ro   0 0
+
+(Replace /path/to/rhel-dvd.iso with your actual file path.)
+
+
+Step 4: Test the Configuration
+Before rebooting, test the entry to ensure there are no syntax errors (an error in fstab can prevent the system from booting):
+Unmount the current manual mount: sudo umount /mnt/disc
+Run the auto-mount command: sudo mount -a
+Verify it worked: ls /mnt/disc
+If you see the BaseOS and AppStream folders, your configuration is correct and will survive a reboot.
+
